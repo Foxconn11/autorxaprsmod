@@ -454,6 +454,7 @@ class APRSUploader(object):
 
         # APRS-IS Socket Object
         self.aprsis_socket = None
+        self.aprsis_socket2 = None
         self.aprsis_lastconnect = 0
         self.aprsis_upload_lock = Lock()
         # Attempt to connect to the APRS-IS server.
@@ -532,10 +533,10 @@ class APRSUploader(object):
     def connect2(self):
         """ Connect to an APRS-IS Server """
         # create socket & connect to server
-        self.aprsis_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.aprsis_socket.settimeout(self.upload_timeout)
+        self.aprsis_socket2 = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.aprsis_socket2.settimeout(self.upload_timeout)
         try:
-            self.aprsis_socket.connect((self.aprsis_host2, self.aprsis_port2))
+            self.aprsis_socket2.connect((self.aprsis_host2, self.aprsis_port2))
             # Send logon string
             # _logon = 'user %s pass %s vers VK5QI-AutoRX filter b/%s \r\n' % (self.aprs_callsign, self.aprs_passcode, self.aprs_callsign)
             _logon = "user %s pass %s vers VK5QI-AutoRX\r\n" % (
@@ -543,21 +544,21 @@ class APRSUploader(object):
                 self.aprs_passcode,
             )
             self.log_debug("Logging in: %s" % _logon)
-            self.aprsis_socket.sendall(_logon.encode("ascii"))
+            self.aprsis_socket2.sendall(_logon.encode("ascii"))
 
             # Set packet filters to limit inbound bandwidth.
             _filter = "#filter p/ZZ\r\n"
             self.log_debug("Setting Filter: %s" % _filter)
-            self.aprsis_socket.sendall(_filter.encode("ascii"))
+            self.aprsis_socket2.sendall(_filter.encode("ascii"))
             _filter = "#filter -t/po\r\n"
             self.log_debug("Setting Filter: %s" % _filter)
-            self.aprsis_socket.sendall(_filter.encode("ascii"))
+            self.aprsis_socket2.sendall(_filter.encode("ascii"))
 
             # Wait for login to complete.
             time.sleep(1)
 
             # Check response
-            _resp = self.aprsis_socket.recv(1024)
+            _resp = self.aprsis_socket2.recv(1024)
 
             try:
                 _resp = _resp.decode("ascii").strip()
@@ -578,7 +579,7 @@ class APRSUploader(object):
 
         except Exception as e:
             self.log_error("Connection to APRS-IS Failed - %s" % str(e))
-            self.aprsis_socket = None
+            self.aprsis_socket2 = None
             return False
 
 
@@ -587,6 +588,7 @@ class APRSUploader(object):
         try:
             _start = time.time()
             _data = self.aprsis_socket.recv(32768)
+            _data = self.aprsis_socket2.recv(32768)
             _dur = time.time() - _start
             self.log_debug("Incoming data from APRS-IS: %s" % (_data.decode()))
         except:
@@ -640,9 +642,14 @@ class APRSUploader(object):
                 if self.aprsis_socket is None:
                     raise IOError("Socket not connected.")
 
+                if self.aprsis_socket2 is None:
+                    raise IOError("Socket not connected.")
+
+
                 # Attempt to send the packet.
                 # This will timeout if the socket is locked up.
                 self.aprsis_socket.sendall(_packet.encode("ascii"))
+                self.aprsis_socket2.sendall(_packet.encode("ascii"))
 
                 # If OK, return.
                 self.log_info("Uploaded to APRS-IS: %s" % str(_packet).strip())
@@ -673,9 +680,23 @@ class APRSUploader(object):
             self.log_debug("Socket shutdown failed - %s" % str(e))
 
         try:
+            self.aprsis_socket2.shutdown(0)
+        except Exception as e:
+            self.log_debug("Socket shutdown failed - %s" % str(e))
+
+
+
+
+        try:
             self.aprsis_socket.close()
         except Exception as e:
             self.log_debug("Socket close failed - %s" % str(e))
+
+        try:
+            self.aprsis_socket2.close()
+        except Exception as e:
+            self.log_debug("Socket close failed - %s" % str(e))
+
 
     def beacon_station_position(self):
         """ Send a station position beacon into APRS-IS """
@@ -837,6 +858,13 @@ class APRSUploader(object):
             ] * 60:
                 if self.aprsis_socket != None:
                     self.beacon_station_position()
+
+            if (time.time() - self.last_user_position_upload) > self.station_beacon[
+                "rate"
+            ] * 60:
+                if self.aprsis_socket2 != None:
+                    self.beacon_station_position()
+
 
             time.sleep(0.1)
 
